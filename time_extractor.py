@@ -16,7 +16,7 @@ class GameTimestampExtractor:
         # OCR configuration optimized for scoreboards
         self.ocr_config = '--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ '
         
-    def download_video(self, youtube_url: str) -> str:
+    def download_video(self, youtube_url: str) -> Tuple[str, Dict]:
         """Download YouTube video and return local file path"""
         ydl_opts = {
             'format': 'best[height<=720]',  # Limit quality for faster processing
@@ -24,17 +24,39 @@ class GameTimestampExtractor:
             'noplaylist': True,
         }
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(youtube_url, download=True)
-            video_path = ydl.prepare_filename(info)
-            
-            # Get actual downloaded filename (extension might differ)
-            for file in os.listdir(self.output_dir):
-                if info['title'] in file:
-                    video_path = os.path.join(self.output_dir, file)
-                    break
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(youtube_url, download=True)
+                
+                # Check if extraction was successful
+                if info is None:
+                    raise ValueError(f"Failed to extract video info from {youtube_url}")
+                
+                # Ensure required fields exist
+                if 'title' not in info:
+                    raise ValueError("Video info missing title field")
+                
+                video_path = ydl.prepare_filename(info)
+                
+                # Get actual downloaded filename (extension might differ)
+                actual_path = None
+                for file in os.listdir(self.output_dir):
+                    if info['title'] in file:
+                        actual_path = os.path.join(self.output_dir, file)
+                        break
+                
+                if actual_path is None:
+                    # Fallback: use the prepared filename
+                    actual_path = video_path
+                
+                # Verify file actually exists
+                if not os.path.exists(actual_path):
+                    raise FileNotFoundError(f"Downloaded video not found at {actual_path}")
                     
-            return video_path, info
+                return actual_path, info
+                
+        except Exception as e:
+            raise Exception(f"Error downloading video from {youtube_url}: {str(e)}")
     
     def extract_frames(self, video_path: str, interval_seconds: int = 2) -> List[Tuple[float, np.ndarray]]:
         """Extract frames from video at specified intervals"""
@@ -234,10 +256,10 @@ class GameTimestampExtractor:
         
         return {
             'video_info': {
-                'title': video_info['title'],
-                'duration': video_info['duration'],
-                'upload_date': video_info['upload_date'],
-                'video_id': video_info['id']
+                'title': video_info.get('title', 'Unknown Title'),
+                'duration': video_info.get('duration', 0),
+                'upload_date': video_info.get('upload_date', 'Unknown'),
+                'video_id': video_info.get('id', 'Unknown')
             },
             'timeline': timeline,
             'processing_stats': {
